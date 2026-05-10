@@ -1,0 +1,11 @@
+langchain
+langchain-groq
+langgraph
+tavily-python
+yfinance
+fastapi
+uvicorn
+python-dotenv
+langchain-community
+streamlit
+reportlab
