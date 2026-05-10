@@ -1,6 +1,4 @@
 from langgraph.graph import StateGraph, END
-from langchain_groq import ChatGroq
-from langchain_core.prompts import ChatPromptTemplate
 from state import AgentState
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -10,55 +8,40 @@ from agents.competitor import competitor_node
 from agents.strategist import strategist_node
 from agents.report_writer import report_writer_node
 
-llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
-
 def supervisor_node(state: AgentState):
     """
     Decides which agent to call next.
-    Uses separate flags for strategy_report (Strategist) and final_report (ReportWriter)
-    so the supervisor never confuses them.
+    Uses direct Python logic first — only falls back to LLM if genuinely ambiguous.
+    This prevents the LLM from hallucinating a repeated agent call.
     """
-    research_done   = bool(state.get("research_notes"))
-    financials_done = bool(state.get("financial_stats"))
-    competitors_done= bool(state.get("competitor_analysis"))
-    strategy_done   = bool(state.get("strategy_report"))
-    report_done     = bool(state.get("final_report"))      # ReportWriter output
+    research_done   = bool(state.get("research_notes", "").strip())
+    financials_done = bool(state.get("financial_stats", "").strip())
+    competitors_done= bool(state.get("competitor_analysis", "").strip())
+    strategy_done   = bool(state.get("strategy_report", "").strip())
+    report_done     = bool(state.get("final_report", "").strip())
 
-    system_prompt = (
-        "You are the Supervisor. Check the current state carefully:\n"
-        f"- Research notes:      {'[DONE]' if research_done    else '[MISSING]'}\n"
-        f"- Financial stats:     {'[DONE]' if financials_done  else '[MISSING]'}\n"
-        f"- Competitor analysis: {'[DONE]' if competitors_done else '[MISSING]'}\n"
-        f"- Strategy/SWOT:       {'[DONE]' if strategy_done    else '[MISSING]'}\n"
-        f"- Final report:        {'[DONE]' if report_done      else '[MISSING]'}\n\n"
-        "Rules — follow in strict order:\n"
-        "1. If Research notes is [MISSING]      → call 'Researcher'\n"
-        "2. If Financial stats is [MISSING]     → call 'FinancialAnalyst'\n"
-        "3. If Competitor analysis is [MISSING] → call 'CompetitorAgent'\n"
-        "4. If Strategy/SWOT is [MISSING]       → call 'Strategist'\n"
-        "5. If Final report is [MISSING]        → call 'ReportWriter'\n"
-        "6. If Final report is [DONE]           → respond 'FINISH'\n\n"
-        "IMPORTANT: Strategy/SWOT and Final report are DIFFERENT things. "
-        "Even when Strategy/SWOT is [DONE], you must still call 'ReportWriter' "
-        "unless Final report is also [DONE].\n\n"
-        "Respond with ONLY the agent name or 'FINISH'. Nothing else."
+    # ── Deterministic routing — no LLM needed ─────────────────────────────────
+    if not research_done:
+        next_dest = "Researcher"
+    elif not financials_done:
+        next_dest = "FinancialAnalyst"
+    elif not competitors_done:
+        next_dest = "CompetitorAgent"
+    elif not strategy_done:
+        next_dest = "Strategist"
+    elif not report_done:
+        next_dest = "ReportWriter"
+    else:
+        next_dest = "FINISH"
+
+    print(
+        f"--- SUPERVISOR [iter={state.get('revision_number',0)}]: → {next_dest} | "
+        f"research={'✓' if research_done else '✗'} "
+        f"financials={'✓' if financials_done else '✗'} "
+        f"competitors={'✓' if competitors_done else '✗'} "
+        f"strategy={'✓' if strategy_done else '✗'} "
+        f"report={'✓' if report_done else '✗'} ---"
     )
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human", "Task: {task}\nIteration: {revision_number}")
-    ])
-
-    chain = prompt | llm
-    response = chain.invoke({
-        "task": state["task"],
-        "revision_number": state.get("revision_number", 0)
-    })
-
-    next_dest = response.content.strip()
-    print(f"--- SUPERVISOR [iter={state.get('revision_number',0)}]: → {next_dest} ---")
-    print(f"    research={research_done} financials={financials_done} "
-          f"competitors={competitors_done} strategy={strategy_done} report={report_done}")
 
     return {"next_agent": next_dest}
 
