@@ -6,7 +6,7 @@ import uuid
 
 st.set_page_config(page_title="ARIA · War Room", layout="wide", page_icon="⬡", initial_sidebar_state="collapsed")
 
-API_URL = "http://localhost:8000"
+API_URL = "https://research-multi-agent.onrender.com"
 
 st.markdown("""
 <style>
